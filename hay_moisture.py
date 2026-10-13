@@ -10,6 +10,7 @@
 # Rotz dryign model to predict a baling time. 
 
 import requests
+import json
 
 # Farmer-provided information
 
@@ -34,6 +35,7 @@ weather_url = "https://archive-api.open-meteo.com/v1/archive"
 
 # Weather data needed before cutting
 
+
 weather_parameters = {
     "latitude": latitude,
     "longitude": longitude,
@@ -43,21 +45,45 @@ weather_parameters = {
         "precipitation_sum",
         "et0_fao_evapotranspiration"
     ],
+    "hourly": [
+        "soil_moisture_0_to_7cm"
+    ],
     "timezone": "America/Chicago"
 }
 
-# Send the request to Open-Meteo
-response = requests.get(
-    weather_url,
-    params=weather_parameters,
-    timeout=60
-)
 
-# Check if the request was successful
-response.raise_for_status()
 
-# Convert the response into Python data
-weather_data = response.json()
+# Try to collect current data from the weather API
+try:
+    response = requests.get(
+        weather_url,
+        params=weather_parameters,
+        timeout=15
+    )
+
+    response.raise_for_status()
+    weather_data = response.json()
+
+    # Save the successful response for future use
+    with open("weather_data.json", "w") as file:
+        json.dump(weather_data, file)
+
+    print("Weather data collected and saved successfully.")
+
+except requests.exceptions.RequestException as error:
+    print("Weather API connection failed:", error)
+
+    # Use previously saved weather data
+    try:
+        with open("weather_data.json", "r") as file:
+            weather_data = json.load(file)
+
+        print("Using previously saved weather data.")
+
+    except FileNotFoundError:
+        print("No saved weather data is available yet.")
+        raise SystemExit(1)
+
 
 # Display the daily weather information
 print("\nHistorical Weather Data:")
@@ -81,3 +107,29 @@ print("\nSeven-Day Water Balance:")
 print("Total Precipitation:", round(total_precipitation, 2), "mm")
 print("Total Evapotranspiration:", round(total_evapotranspiration, 2), "mm")
 print("Water Balance:", round(water_balance, 2), "mm")
+
+# Step 3: Retrieve soil moisture data
+
+# Get hourly soil moisture values from the weather API
+soil_moisture = weather_data["hourly"]["soil_moisture_0_to_7cm"]
+
+# Display the soil moisture values
+print("\nSoil moisture data retrieved successfully.")
+print("Number of hourly readings:", len(soil_moisture))
+
+
+# Calculate the average soil moisture over seven days
+
+# Remove any missing values
+valid_soil_moisture = [
+    value for value in soil_moisture if value is not None
+]
+
+# Calculate the average
+average_soil_moisture = (
+    sum(valid_soil_moisture) / len(valid_soil_moisture)
+)
+
+# Display the average
+print("\nAverage Seven-Day Soil Moisture:")
+print(round(average_soil_moisture, 4), "m³/m³")
