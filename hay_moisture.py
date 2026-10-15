@@ -562,3 +562,29 @@ hydration_index = (
 
 print("\nPre-Harvest Hydration Index:")
 print(round(hydration_index, 4))
+
+print(round(hydration_index, 4))
+# Step 17: Estimate Initial Alfalfa Moisture
+
+# Temporary moisture limits based on our research
+moisture_min = 75
+moisture_max = 80
+
+# Convert the Hydration Index into estimated initial moisture
+initial_moisture = moisture_min + hydration_index * (moisture_max - moisture_min)
+
+# Display the estimated starting moisture
+print("\nExperimental Estimated Initial Alfalfa Moisture (%):")
+print(round(initial_moisture, 2))
+
+# Step 18: Convert wet-basis moisture to dry-basis moisture
+
+# Convert percentage to decimal
+initial_moisture_decimal = initial_moisture / 100
+
+# Calculate dry-basis moisture
+initial_moisture_dry_basis = initial_moisture_decimal / (1 - initial_moisture_decimal)
+
+# Display the result
+print("\nExperimental Initial Moisture (Dry Basis):")
+print(round(initial_moisture_dry_basis, 4))
