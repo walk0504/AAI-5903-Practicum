@@ -13,6 +13,69 @@ import requests
 import json
 import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+import math
+import os
+import time
+from datetime import datetime
+
+# Retrieve weather data with retries and a saved backup
+def get_weather_data(url, parameters, filename):
+
+    # Check whether saved data matches the current request
+    request_info = {
+        "url": url,
+        "parameters": parameters
+    }
+
+    # Try the weather API up to three times
+    for attempt in range(3):
+        try:
+            response = requests.get(
+                url,
+                params=parameters,
+                timeout=(10, 45)
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            # Save the successful response with its request details
+            saved_data = {
+                "request": request_info,
+                "weather": data,
+                "saved_at": datetime.now().isoformat()
+            }
+
+            temporary_file = filename + ".tmp"
+
+            with open(temporary_file, "w") as file:
+                json.dump(saved_data, file)
+
+            os.replace(temporary_file, filename)
+
+            print("Fresh weather data collected successfully.")
+            return data
+
+        except (requests.exceptions.RequestException, ValueError) as error:
+            print(f"Weather API attempt {attempt + 1} failed: {error}")
+
+            if attempt < 2:
+                time.sleep(2 * (attempt + 1))
+
+    # Use saved data only if it matches the current request
+    if os.path.exists(filename):
+
+        with open(filename, "r") as file:
+            saved_data = json.load(file)
+
+        if saved_data.get("request") == request_info:
+            print("WARNING: Using previously saved weather data.")
+            print("Saved at:", saved_data.get("saved_at"))
+            return saved_data["weather"]
+
+    raise RuntimeError(
+        "Weather API unavailable and no matching saved data exists."
+    )
 
 # Farmer-provided information
 
@@ -63,43 +126,22 @@ weather_parameters = {
         "et0_fao_evapotranspiration"
     ],
     "hourly": [
-        "soil_moisture_0_to_7cm"
-    ],
+    "soil_moisture_0_to_7cm",
+    "temperature_2m",
+    "relative_humidity_2m"
+],
+
     "timezone": "America/Chicago"
 }
 
 
+# Collect seven-day weather data with retries and backup
+weather_data = get_weather_data(
+    weather_url,
+    weather_parameters,
+    "seven_day_weather_cache.json"
+)
 
-# Try to collect current data from the weather API
-try:
-    response = requests.get(
-        weather_url,
-        params=weather_parameters,
-        timeout=15
-    )
-
-    response.raise_for_status()
-    weather_data = response.json()
-
-    # Save the successful response for future use
-    with open("weather_data.json", "w") as file:
-        json.dump(weather_data, file)
-
-    print("Weather data collected and saved successfully.")
-
-except requests.exceptions.RequestException as error:
-    print("Weather API connection failed:", error)
-
-    # Use previously saved weather data
-    try:
-        with open("weather_data.json", "r") as file:
-            weather_data = json.load(file)
-
-        print("Using previously saved weather data.")
-
-    except FileNotFoundError:
-        print("No saved weather data is available yet.")
-        raise SystemExit(1)
 
 
 # Display the daily weather information
@@ -126,9 +168,39 @@ print("Total Evapotranspiration:", round(total_evapotranspiration, 2), "mm")
 print("Water Balance:", round(water_balance, 2), "mm")
 
 # Step 3: Retrieve soil moisture data
+# Check that the API returned the data needed for VPD
+required_variables = ["temperature_2m", "relative_humidity_2m"]
 
+for variable in required_variables:
+    if variable not in weather_data["hourly"]:
+        raise ValueError(
+            f"Missing {variable} in weather data. "
+            "Refresh the saved weather data from Open-Meteo."
+        )
 # Get hourly soil moisture values from the weather API
 soil_moisture = weather_data["hourly"]["soil_moisture_0_to_7cm"]
+# Get hourly temperature and humidity readings
+hourly_temperature = weather_data["hourly"]["temperature_2m"]
+
+hourly_humidity = weather_data["hourly"]["relative_humidity_2m"]
+# Step 11: Calculate hourly Vapor Pressure Deficit (VPD)
+
+vpd_values = []
+
+for temperature, humidity in zip(hourly_temperature, hourly_humidity):
+
+    saturation_vapor_pressure = 0.6108 * math.exp(
+        (17.27 * temperature) / (temperature + 237.3)
+    )
+
+    vpd = saturation_vapor_pressure * (1 - humidity / 100)
+
+    vpd_values.append(vpd)
+
+average_vpd = sum(vpd_values) / len(vpd_values)
+
+print("\nAverage Seven-Day VPD:")
+print(round(average_vpd, 3), "kPa")
 
 # Display the soil moisture values
 print("\nSoil moisture data retrieved successfully.")
@@ -190,46 +262,17 @@ exploration_parameters = {
     ],
     "timezone": "America/Chicago"
 }
-# Try collecting exploration weather data up to three times
-for attempt in range(3):
-    try:
-        exploration_response = requests.get(
-            weather_url,
-            params=exploration_parameters,
-            timeout=30
-        )
-
-        exploration_response.raise_for_status()
-        exploration_data = exploration_response.json()
-
-        print("Exploration weather data collected successfully.")
-        break
-
-    except requests.exceptions.RequestException as error:
-        print("Weather API attempt failed:", error)
-
-        if attempt == 2:
-            print("Could not collect exploration weather data.")
-            raise
-
-print("\nExploration weather data collected successfully.")
-print("Number of daily readings:", len(exploration_data["daily"]["time"]))
-print("Number of hourly readings:", len(exploration_data["hourly"]["time"]))# Request historical weather data for exploration
-exploration_response = requests.get(
+# Collect exploration weather data with retries and backup
+exploration_data = get_weather_data(
     weather_url,
-    params=exploration_parameters,
-    timeout=30
+    exploration_parameters,
+    "exploration_weather_cache.json"
 )
 
-# Check whether the API request was successful
-exploration_response.raise_for_status()
-
-# Convert the response into Python data
-exploration_data = exploration_response.json()
-
-print("\nExploration weather data collected successfully.")
+print("\nExploration weather data is ready.")
 print("Number of daily readings:", len(exploration_data["daily"]["time"]))
 print("Number of hourly readings:", len(exploration_data["hourly"]["time"]))
+
 
 # Step 6: Graph soil moisture during the exploration period
 
@@ -431,3 +474,91 @@ plt.savefig("exploration_evapotranspiration.png")
 plt.close()
 
 print("Evapotranspiration graph saved successfully.")
+# Step 12: Prepare weather measurements for the Hydration Index
+
+# Store our three calculated weather measurements
+soil_moisture_value = average_soil_moisture
+water_balance_value = water_balance
+vpd_value = average_vpd
+
+print("\nWeather Measurements for Hydration Index:")
+print("Soil Moisture:", round(soil_moisture_value, 4), "m³/m³")
+print("Water Balance:", round(water_balance_value, 2), "mm")
+print("Average VPD:", round(vpd_value, 3), "kPa")
+# Step 13: Normalize soil moisture
+
+# Temporary reference values for testing
+soil_moisture_min = 0.10
+soil_moisture_max = 0.40
+
+# Calculate normalized soil moisture
+normalized_soil_moisture = (
+    (soil_moisture_value - soil_moisture_min)
+    / (soil_moisture_max - soil_moisture_min)
+)
+
+# Keep the normalized value between 0 and 1
+normalized_soil_moisture = max(
+    0, min(1, normalized_soil_moisture)
+)
+
+print("\nNormalized Soil Moisture:")
+print(round(normalized_soil_moisture, 4))
+# Step 14: Normalize seven-day water balance
+
+# Temporary reference values for testing
+water_balance_min = -50
+water_balance_max = 50
+
+# Calculate normalized water balance
+normalized_water_balance = (
+    (water_balance_value - water_balance_min)
+    / (water_balance_max - water_balance_min)
+)
+
+# Keep the normalized value between 0 and 1
+normalized_water_balance = max(
+    0, min(1, normalized_water_balance)
+)
+
+print("\nNormalized Water Balance:")
+print(round(normalized_water_balance, 4))
+# Step 15: Normalize Vapor Pressure Deficit (VPD)
+
+# Temporary reference values for testing
+vpd_min = 0
+vpd_max = 3
+
+# Calculate normalized VPD
+normalized_vpd = (
+    (vpd_value - vpd_min)
+    / (vpd_max - vpd_min)
+)
+
+# Keep normalized VPD between 0 and 1
+normalized_vpd = max(0, min(1, normalized_vpd))
+
+# Reverse the VPD score for the Hydration Index
+vpd_hydration_score = 1 - normalized_vpd
+
+print("\nNormalized VPD:")
+print(round(normalized_vpd, 4))
+
+print("VPD Hydration Score:")
+print(round(vpd_hydration_score, 4))
+# Step 16: Calculate the Pre-Harvest Hydration Index
+
+# Temporary equal weights for testing
+weight_soil_moisture = 1 / 3
+weight_water_balance = 1 / 3
+weight_vpd = 1 / 3
+
+# Combine the three normalized weather measurements
+hydration_index = (
+    weight_soil_moisture * normalized_soil_moisture
+    + weight_water_balance * normalized_water_balance
+    + weight_vpd * vpd_hydration_score
+)
+
+print("\nPre-Harvest Hydration Index:")
+print(round(hydration_index, 4))
