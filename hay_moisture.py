@@ -777,3 +777,685 @@ print("\nFirst Five Drying Hours:")
 
 for i in range(cutting_hour_index, cutting_hour_index + 5):
     print(drying_hourly["time"][i])
+
+    # Step 32: Set up 15-minute moisture prediction intervals
+
+prediction_interval_minutes = 15
+
+# Convert minutes into hours for the Rotz equation
+prediction_interval_hours = prediction_interval_minutes / 60
+
+# Number of predictions in one day
+predictions_per_day = int(24 / prediction_interval_hours)
+
+print("\n15-Minute Prediction Settings:")
+print("Prediction interval:", prediction_interval_minutes, "minutes")
+print("Time step in hours:", prediction_interval_hours)
+print("Predictions per day:", predictions_per_day)
+
+# Step 33: Calculate moisture every 15 minutes for the first hour
+
+current_moisture_db = initial_moisture_dry_basis
+
+print("\nFirst Hour: 15-Minute Moisture Predictions")
+
+for step in range(1, 5):
+
+    # Apply the Rotz drying rate over 15 minutes
+    current_moisture_db = (
+        current_moisture_db
+        * math.exp(-drying_rate * prediction_interval_hours)
+    )
+
+    # Convert dry-basis moisture to wet-basis percentage
+    current_moisture_wb = (
+        current_moisture_db / (1 + current_moisture_db)
+    ) * 100
+
+    elapsed_minutes = step * prediction_interval_minutes
+
+    print(
+        f"After {elapsed_minutes} minutes:",
+        f"{current_moisture_wb:.2f}%"
+    )
+
+    # Step 34: Examine changing hourly drying conditions
+
+print("\nHourly Weather Conditions After Cutting:")
+
+for i in range(cutting_hour_index, cutting_hour_index + 5):
+
+    weather_time = drying_hourly["time"][i]
+    solar = drying_hourly["shortwave_radiation"][i]
+    temperature = drying_hourly["temperature_2m"][i]
+    soil_moisture = drying_hourly["soil_moisture_0_to_7cm"][i]
+
+    print(
+        f"{weather_time} | "
+        f"Solar: {solar} W/m² | "
+        f"Temperature: {temperature} °C | "
+        f"Soil Moisture: {soil_moisture} m³/m³"
+    )
+
+    # Step 35: Estimate weather conditions every 15 minutes
+
+print("\nInterpolated Weather for the First Hour:")
+
+start_index = cutting_hour_index
+
+for step in range(4):
+
+    fraction = step * prediction_interval_hours
+
+    solar_start = drying_hourly["shortwave_radiation"][start_index]
+    solar_end = drying_hourly["shortwave_radiation"][start_index + 1]
+
+    temp_start = drying_hourly["temperature_2m"][start_index]
+    temp_end = drying_hourly["temperature_2m"][start_index + 1]
+
+    soil_start = drying_hourly["soil_moisture_0_to_7cm"][start_index]
+    soil_end = drying_hourly["soil_moisture_0_to_7cm"][start_index + 1]
+
+    solar_15min = solar_start + fraction * (solar_end - solar_start)
+    temp_15min = temp_start + fraction * (temp_end - temp_start)
+    soil_15min = soil_start + fraction * (soil_end - soil_start)
+
+    elapsed_minutes = step * prediction_interval_minutes
+
+    print(
+        f"After {elapsed_minutes} minutes | "
+        f"Solar: {solar_15min:.2f} W/m² | "
+        f"Temperature: {temp_15min:.2f} °C | "
+        f"Soil Moisture: {soil_15min:.4f} m³/m³"
+    )
+
+    # Step 36: Recalculate the Rotz drying rate every 15 minutes
+
+print("\n15-Minute Rotz Drying Rates:")
+
+for step in range(4):
+
+    fraction = step * prediction_interval_hours
+
+    # Get hourly weather measurements
+    solar_start = drying_hourly["shortwave_radiation"][start_index]
+    solar_end = drying_hourly["shortwave_radiation"][start_index + 1]
+
+    temp_start = drying_hourly["temperature_2m"][start_index]
+    temp_end = drying_hourly["temperature_2m"][start_index + 1]
+
+    soil_start = drying_hourly["soil_moisture_0_to_7cm"][start_index]
+    soil_end = drying_hourly["soil_moisture_0_to_7cm"][start_index + 1]
+
+    # Interpolate weather for this 15-minute interval
+    SI = solar_start + fraction * (solar_end - solar_start)
+    DB = temp_start + fraction * (temp_end - temp_start)
+    soil_volumetric = soil_start + fraction * (soil_end - soil_start)
+
+    # Convert soil moisture to dry-basis percentage
+    SM = (soil_volumetric / 1.43) * 100
+
+    # Calculate Rotz drying rate
+    DR = (
+        SI * (1 + 9.30 * 0) + 5.42 * DB
+    ) / (
+        66.4 * SM
+        + 1434.69 * (2.06 - 0.97 * 1) * (1.55 + 21.9 * 0)
+        + 3037
+    )
+
+    elapsed_minutes = step * prediction_interval_minutes
+
+    print(
+        f"After {elapsed_minutes} minutes: "
+        f"Drying rate = {DR:.5f} per hour"
+    )
+
+    # Step 37: Predict moisture using changing 15-minute drying rates
+
+print("\nUpdated 15-Minute Moisture Predictions:")
+
+moisture_db = initial_moisture_dry_basis
+
+for step in range(4):
+
+    fraction = step * prediction_interval_hours
+
+    # Estimate weather conditions
+    SI = (
+        drying_hourly["shortwave_radiation"][start_index]
+        + fraction * (
+            drying_hourly["shortwave_radiation"][start_index + 1]
+            - drying_hourly["shortwave_radiation"][start_index]
+        )
+    )
+
+    DB = (
+        drying_hourly["temperature_2m"][start_index]
+        + fraction * (
+            drying_hourly["temperature_2m"][start_index + 1]
+            - drying_hourly["temperature_2m"][start_index]
+        )
+    )
+
+    soil_volumetric = (
+        drying_hourly["soil_moisture_0_to_7cm"][start_index]
+        + fraction * (
+            drying_hourly["soil_moisture_0_to_7cm"][start_index + 1]
+            - drying_hourly["soil_moisture_0_to_7cm"][start_index]
+        )
+    )
+
+    # Convert soil moisture to dry-basis percentage
+    SM = (soil_volumetric / 1.43) * 100
+
+    # Calculate the Rotz drying rate
+    DR = (
+        SI + 5.42 * DB
+    ) / (
+        66.4 * SM
+        + 1434.69 * (2.06 - 0.97) * 1.55
+        + 3037
+    )
+
+    # Update moisture for 15 minutes
+    moisture_db *= math.exp(-DR * prediction_interval_hours)
+
+    # Convert to wet-basis moisture percentage
+    moisture_wb = (moisture_db / (1 + moisture_db)) * 100
+
+    elapsed_minutes = (step + 1) * prediction_interval_minutes
+
+    print(
+        f"After {elapsed_minutes} minutes: "
+        f"{moisture_wb:.2f}%"
+    )
+
+    # Step 38: Calculate moisture every 15 minutes
+# across all available drying weather data
+
+print("\nFull 15-Minute Drying Simulation:")
+
+moisture_db = initial_moisture_dry_basis
+
+simulation_results = []
+
+for hour_index in range(cutting_hour_index, len(drying_hourly["time"]) - 1):
+
+    # Identify whether this is the cutting day
+    current_date = drying_hourly["time"][hour_index][:10]
+
+    if current_date == cutting_date:
+        DAY = 1
+    else:
+        DAY = 0
+
+    for step in range(4):
+
+        fraction = step * prediction_interval_hours
+
+        # Interpolate weather conditions
+        SI = (
+            drying_hourly["shortwave_radiation"][hour_index]
+            + fraction * (
+                drying_hourly["shortwave_radiation"][hour_index + 1]
+                - drying_hourly["shortwave_radiation"][hour_index]
+            )
+        )
+
+        DB = (
+            drying_hourly["temperature_2m"][hour_index]
+            + fraction * (
+                drying_hourly["temperature_2m"][hour_index + 1]
+                - drying_hourly["temperature_2m"][hour_index]
+            )
+        )
+
+        soil_volumetric = (
+            drying_hourly["soil_moisture_0_to_7cm"][hour_index]
+            + fraction * (
+                drying_hourly["soil_moisture_0_to_7cm"][hour_index + 1]
+                - drying_hourly["soil_moisture_0_to_7cm"][hour_index]
+            )
+        )
+
+        SM = (soil_volumetric / 1.43) * 100
+
+        # Calculate Rotz drying rate
+        DR = (
+            SI + 5.42 * DB
+        ) / (
+            66.4 * SM
+            + 1434.69 * (2.06 - 0.97 * DAY) * 1.55
+            + 3037
+        )
+
+        # Update moisture over the 15-minute interval
+        moisture_db *= math.exp(-DR * prediction_interval_hours)
+
+        # Convert to wet-basis percentage
+        moisture_wb = (moisture_db / (1 + moisture_db)) * 100
+
+        # Calculate elapsed time
+        elapsed_hours = (
+            (hour_index - cutting_hour_index)
+            + (step + 1) * prediction_interval_hours
+        )
+
+        simulation_results.append({
+            "elapsed_hours": elapsed_hours,
+            "moisture_percent": moisture_wb,
+            "drying_rate": DR
+        })
+
+# Print summary without flooding the terminal
+print("Total 15-minute predictions:", len(simulation_results))
+
+print(
+    "Final predicted moisture:",
+    f"{simulation_results[-1]['moisture_percent']:.2f}%"
+)
+
+print(
+    "Total simulated hours:",
+    f"{simulation_results[-1]['elapsed_hours']:.2f}"
+)
+
+# Step 39: Check weather data needed for moisture rebound
+
+print("\nMoisture Rebound Weather Data Check:")
+
+required_variables = [
+    "relative_humidity_2m",
+    "temperature_2m",
+    "wind_speed_10m"
+]
+
+for variable in required_variables:
+    if variable in drying_hourly:
+        print(f"{variable}: Available")
+    else:
+        print(f"{variable}: Missing")
+
+        # Step 40: Examine humidity during the drying period
+
+print("\nHumidity and Temperature After Cutting:")
+
+for i in range(cutting_hour_index, min(cutting_hour_index + 24, len(drying_hourly["time"]))):
+
+    weather_time = drying_hourly["time"][i]
+    humidity = drying_hourly["relative_humidity_2m"][i]
+    temperature = drying_hourly["temperature_2m"][i]
+
+    print(
+        f"{weather_time} | "
+        f"Humidity: {humidity}% | "
+        f"Temperature: {temperature} °C"
+    )
+
+    # Step 41: Summarize humidity during the prediction period
+
+humidity_values = drying_hourly["relative_humidity_2m"][
+    cutting_hour_index:
+]
+
+valid_humidity = [
+    value for value in humidity_values
+    if value is not None
+]
+
+print("\nHumidity Summary After Cutting:")
+print("Lowest humidity:", min(valid_humidity), "%")
+print("Highest humidity:", max(valid_humidity), "%")
+
+humid_hours = sum(
+    1 for value in valid_humidity if value >= 85
+)
+
+print("Hours with humidity at least 85%:", humid_hours)
+
+# Step 42: Check for hourly precipitation data
+
+print("\nPrecipitation Data Check:")
+
+if "precipitation" in drying_hourly:
+    print("Hourly precipitation: Available")
+
+    rainfall_values = drying_hourly["precipitation"]
+
+    valid_rainfall = [
+        value for value in rainfall_values
+        if value is not None
+    ]
+
+    print(
+        "Total precipitation:",
+        round(sum(valid_rainfall), 2),
+        "mm"
+    )
+
+else:
+    print("Hourly precipitation: Missing")
+
+    # Step 43: Find rainfall after the alfalfa was cut
+
+print("\nRainfall After Cutting:")
+
+rainfall_after_cutting = drying_hourly["precipitation"][cutting_hour_index:]
+times_after_cutting = drying_hourly["time"][cutting_hour_index:]
+
+total_rain_after_cutting = 0
+
+for time, rainfall in zip(times_after_cutting, rainfall_after_cutting):
+    if rainfall is not None and rainfall > 0:
+        print(f"{time} | Rainfall: {rainfall} mm")
+        total_rain_after_cutting += rainfall
+
+print(
+    "Total rainfall after cutting:",
+    round(total_rain_after_cutting, 2),
+    "mm"
+)
+
+# Step 44: Summarize rainfall by date after cutting
+
+from collections import defaultdict
+
+rainfall_by_date = defaultdict(float)
+
+for time, rainfall in zip(times_after_cutting, rainfall_after_cutting):
+    if rainfall is not None and rainfall > 0:
+        date = time[:10]
+        rainfall_by_date[date] += rainfall
+
+print("\nDaily Rainfall After Cutting:")
+
+for date, total in rainfall_by_date.items():
+    print(f"{date}: {total:.2f} mm")
+
+    # Step 45: USDA field-curing dew absorption parameter
+# Source: USDA Integrated Farm System Model Reference Manual
+# Equation 6.4, based on Rotz (1985)
+
+dew_absorption_rate = -4.0
+
+print("\nUSDA Dew Absorption Parameter:")
+print("Dew absorption rate:", dew_absorption_rate, "g/m² per hour")
+
+# Step 46: Check swath density for dew absorption
+
+swath_density_g_m2 = 1434.69
+
+print("\nDew Model Swath Density Check:")
+print("Swath density:", swath_density_g_m2, "g dry matter/m²")
+
+if swath_density_g_m2 > 0:
+    print("Swath density is positive: OK")
+else:
+    print("ERROR: Swath density must be positive")
+
+    # Step 47: Check humidity and wind inputs for dew modeling
+
+print("\nDew Model Weather Inputs:")
+
+for i in range(cutting_hour_index, cutting_hour_index + 5):
+    time = drying_hourly["time"][i]
+    humidity = drying_hourly["relative_humidity_2m"][i]
+    wind = drying_hourly["wind_speed_10m"][i]
+
+    print(
+        f"{time} | "
+        f"Humidity: {humidity}% | "
+        f"Wind: {wind} km/h"
+    )
+
+    # Step 48: Convert wind speed from km/h to m/s
+
+print("\nWind Speed Unit Conversion:")
+
+for i in range(cutting_hour_index, cutting_hour_index + 5):
+    time = drying_hourly["time"][i]
+    wind_kmh = drying_hourly["wind_speed_10m"][i]
+
+    wind_ms = wind_kmh / 3.6
+
+    print(
+        f"{time} | "
+        f"{wind_kmh:.1f} km/h = {wind_ms:.2f} m/s"
+    )
+
+# Step 49: Examine overnight humidity and wind speed
+# These hours are for inspecting weather, not proving dew occurred.
+
+print("\nOvernight Weather Conditions:")
+
+for i in range(cutting_hour_index, len(drying_hourly["time"])):
+
+    time = drying_hourly["time"][i]
+    hour = int(time[11:13])
+
+    if hour >= 20 or hour < 7:
+
+        humidity = drying_hourly["relative_humidity_2m"][i]
+        wind_kmh = drying_hourly["wind_speed_10m"][i]
+
+        if humidity is None or wind_kmh is None:
+            continue
+
+        wind_ms = wind_kmh / 3.6
+
+        print(
+            f"{time} | "
+            f"Humidity: {humidity}% | "
+            f"Wind: {wind_ms:.2f} m/s"
+        )
+
+        # Step 50: Calculate USDA equilibrium moisture for the first night
+# USDA IFSM Reference Manual, Equation 6.5
+
+import math
+
+night_hours = [
+    i for i, time in enumerate(drying_hourly["time"])
+    if "2026-10-01T20:00" <= time <= "2026-10-02T06:00"
+]
+
+night_humidity = [
+    drying_hourly["relative_humidity_2m"][i]
+    for i in night_hours
+]
+
+night_wind = [
+    drying_hourly["wind_speed_10m"][i] / 3.6
+    for i in night_hours
+]
+
+average_rh = sum(night_humidity) / len(night_humidity) / 100
+average_wind = sum(night_wind) / len(night_wind)
+
+equilibrium_moisture_db = (
+    0.4 + 3.6 / math.exp(0.2 * average_wind)
+) / math.exp(2.5 * (1 - average_rh))
+
+equilibrium_moisture_wb = (
+    equilibrium_moisture_db /
+    (1 + equilibrium_moisture_db)
+) * 100
+
+print("\nFirst Night Equilibrium Moisture:")
+print("Average humidity:", round(average_rh * 100, 2), "%")
+print("Average wind:", round(average_wind, 2), "m/s")
+print("Equilibrium moisture:", round(equilibrium_moisture_wb, 2), "% wet basis")
+
+# Step 51: Correct USDA Equation 6.5
+
+equilibrium_moisture_db = (
+    0.4
+    + (3.6 / math.exp(0.2 * average_wind))
+    / math.exp(2.5 * (1 - average_rh))
+)
+
+equilibrium_moisture_wb = (
+    equilibrium_moisture_db /
+    (1 + equilibrium_moisture_db)
+) * 100
+
+print("\nCorrected USDA Equilibrium Moisture:")
+print("Dry basis:", round(equilibrium_moisture_db, 4))
+print("Wet basis:", round(equilibrium_moisture_wb, 2), "%")
+
+# Step 52: Test USDA dew absorption equation (6.4)
+# Illustrative starting moisture only
+
+starting_moisture_wb = 15.0
+starting_moisture_db = starting_moisture_wb / (100 - starting_moisture_wb)
+
+night_duration_hours = 11.0
+
+moisture_after_dew_db = (
+    equilibrium_moisture_db
+    + (starting_moisture_db - equilibrium_moisture_db)
+    * math.exp(
+        dew_absorption_rate
+        * night_duration_hours
+        / swath_density_g_m2
+    )
+)
+
+moisture_after_dew_wb = (
+    moisture_after_dew_db / (1 + moisture_after_dew_db)
+) * 100
+
+print("\nUSDA Dew Absorption Test:")
+print("Starting moisture:", starting_moisture_wb, "%")
+print("Predicted morning moisture:", round(moisture_after_dew_wb, 2), "%")
+print(
+    "Moisture change:",
+    round(moisture_after_dew_wb - starting_moisture_wb, 2),
+    "percentage points"
+)
+
+# Step 53: Test sensitivity to assumed swath density
+
+print("\nDew Absorption Sensitivity Test:")
+
+for multiplier in [0.5, 1.0, 1.5]:
+
+    test_density = swath_density_g_m2 * multiplier
+
+    test_moisture_db = (
+        equilibrium_moisture_db
+        + (starting_moisture_db - equilibrium_moisture_db)
+        * math.exp(
+            dew_absorption_rate
+            * night_duration_hours
+            / test_density
+        )
+    )
+
+    test_moisture_wb = (
+        test_moisture_db / (1 + test_moisture_db)
+    ) * 100
+
+    print(
+        f"Density: {test_density:.2f} g/m² | "
+        f"Predicted moisture: {test_moisture_wb:.2f}%"
+    )
+
+    # Step 54: Compare equilibrium moisture for two nights
+
+night_periods = [
+    ("Night 1", "2026-10-01T20:00", "2026-10-02T06:00"),
+    ("Night 2", "2026-10-02T20:00", "2026-10-03T06:00")
+]
+
+print("\nNighttime Equilibrium Moisture Comparison:")
+
+for name, start, end in night_periods:
+
+    indices = [
+        i for i, time in enumerate(drying_hourly["time"])
+        if start <= time <= end
+    ]
+
+    rh_values = [
+        drying_hourly["relative_humidity_2m"][i]
+        for i in indices
+    ]
+
+    wind_values = [
+        drying_hourly["wind_speed_10m"][i] / 3.6
+        for i in indices
+    ]
+
+    avg_rh = sum(rh_values) / len(rh_values) / 100
+    avg_wind = sum(wind_values) / len(wind_values)
+
+    equilibrium_db = (
+        0.4
+        + (3.6 / math.exp(0.2 * avg_wind))
+        / math.exp(2.5 * (1 - avg_rh))
+    )
+
+    equilibrium_wb = (
+        equilibrium_db / (1 + equilibrium_db)
+    ) * 100
+
+    print(
+        f"{name} | "
+        f"Humidity: {avg_rh * 100:.1f}% | "
+        f"Wind: {avg_wind:.2f} m/s | "
+        f"Equilibrium: {equilibrium_wb:.2f}%"
+    )
+
+    # Step 55: Compare predicted dew absorption across two nights
+# Illustrative test: both nights begin at 15% moisture
+
+print("\nNighttime Moisture Regain Comparison:")
+
+for name, start, end in night_periods:
+
+    indices = [
+        i for i, time in enumerate(drying_hourly["time"])
+        if start <= time <= end
+    ]
+
+    rh_values = [
+        drying_hourly["relative_humidity_2m"][i]
+        for i in indices
+    ]
+
+    wind_values = [
+        drying_hourly["wind_speed_10m"][i] / 3.6
+        for i in indices
+    ]
+
+    avg_rh = sum(rh_values) / len(rh_values) / 100
+    avg_wind = sum(wind_values) / len(wind_values)
+
+    equilibrium_db = (
+        0.4
+        + (3.6 / math.exp(0.2 * avg_wind))
+        / math.exp(2.5 * (1 - avg_rh))
+    )
+
+    initial_db = 15.0 / 85.0
+
+    predicted_db = (
+        equilibrium_db
+        + (initial_db - equilibrium_db)
+        * math.exp(
+            dew_absorption_rate
+            * night_duration_hours
+            / swath_density_g_m2
+        )
+    )
+
+    predicted_wb = predicted_db / (1 + predicted_db) * 100
+
+    print(
+        f"{name} | "
+        f"Starting: 15.00% | "
+        f"Predicted: {predicted_wb:.2f}% | "
+        f"Change: {predicted_wb - 15:.2f} percentage points"
+    )
