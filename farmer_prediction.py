@@ -21,7 +21,7 @@ field_location = "Hammon, Oklahoma"
 latitude = 35.6328
 longitude = -99.3815
 
-cutting_date = "2026-06-15"
+cutting_date = "2026-06-12"
 cutting_time = "08:00"
 
 crop_type = "alfalfa"
@@ -41,7 +41,10 @@ prediction_interval_hours = prediction_interval_minutes / 60
 
 # Soil information
 soil_bulk_density = 1.43  # g/cm³; estimated soil value
-
+# Experimental fraction of rainfall retained by the hay.
+# 1.0 = 100% retention; 0.5 = 50% retention.
+# This is a sensitivity-test assumption, not a measured value.
+rainfall_retention_fraction = 0.5
 print("\nALFALFA BALING PREDICTOR")
 print("Field:", field_location)
 print("Cutting:", cutting_date, cutting_time)
@@ -208,11 +211,21 @@ def absorb_dew(moisture_db, equilibrium_db, hours, density):
 
 
 def absorb_rain(moisture_db, rainfall_mm, density):
-    return (
+
+    # Published-style experimental rainfall response
+    predicted_moisture = (
         4.0
         + (moisture_db - 4.0)
         * math.exp(-150.0 * rainfall_mm / density)
     )
+
+    # Physical upper limit: all rainfall retained by the hay
+    maximum_moisture = moisture_db + (
+    rainfall_mm * 1000 * rainfall_retention_fraction / density
+)
+
+    # Do not allow more water gain than rainfall supplies
+    return min(predicted_moisture, maximum_moisture)
 
 
 # STEP 5: COMBINED HAY MOISTURE PREDICTION
@@ -274,27 +287,32 @@ for hour_index in range(
 
         # Apply recorded rainfall once per hourly observation,
         # not four times for the same rainfall amount.
-        if step == 3:
-            rainfall = drying_hourly["precipitation"][hour_index + 1]
+         # Spread hourly rainfall across four 15-minute intervals.
+        # This is an assumption, not measured 15-minute rainfall.
+        hourly_rainfall = drying_hourly["precipitation"][hour_index + 1]
+        moisture_before_rain = moisture_db
+        if hourly_rainfall is not None and hourly_rainfall > 0:
+            rainfall_15min = hourly_rainfall / 4
 
-            if rainfall is not None and rainfall > 0:
-                moisture_db = absorb_rain(
-                    moisture_db,
-                    rainfall,
-                    swath_density
-                )
+            moisture_db = absorb_rain(
+                moisture_db,
+                rainfall_15min,
+                swath_density
+            )
+        rain_gain_db = moisture_db - moisture_before_rain
 
         # Experimental nighttime moisture regain.
         # Low solar radiation and high humidity are used
         # as indicators of possible dew conditions.
+        moisture_before_dew = moisture_db
+
         if solar < 10 and humidity >= 85:
             equilibrium_db = nighttime_equilibrium_moisture(
                 humidity,
                 wind
             )
 
-            # Only absorb moisture when the estimated
-            # equilibrium is wetter than the current hay.
+            # Only absorb moisture if equilibrium is higher.
             if equilibrium_db > moisture_db:
                 moisture_db = absorb_dew(
                     moisture_db,
@@ -302,6 +320,8 @@ for hour_index in range(
                     prediction_interval_hours,
                     swath_density
                 )
+
+        dew_gain_db = moisture_db - moisture_before_dew
 
         moisture_wb = (
             moisture_db / (1 + moisture_db)
@@ -319,7 +339,9 @@ for hour_index in range(
         simulation_results.append({
             "time": prediction_time,
             "moisture_percent": moisture_wb,
-            "drying_rate": drying_rate
+            "drying_rate": drying_rate,
+            "rain_gain_db": rain_gain_db,
+            "dew_gain_db": dew_gain_db
         })
 
 print("\nCOMBINED MOISTURE PREDICTION")
@@ -451,4 +473,151 @@ if dehydration_time is not None:
 else:
     print("Alfalfa did not reach 5% during the simulation.")
 
-    
+
+# STEP 11: INSPECT MOISTURE DURING JUNE 18 RAINFALL
+
+print("\nJUNE 18 STORM MOISTURE CHECK")
+
+for result in simulation_results:
+    if (
+        result["time"].date().isoformat() == "2026-06-18"
+        and result["time"].minute == 0
+        and 14 <= result["time"].hour <= 21
+    ):
+        print(
+            result["time"],
+            "| Moisture:",
+            f"{result['moisture_percent']:.2f}%"
+        )
+
+        # STEP 12: FIND REHYDRATION FROM 5% TO 15%
+
+print("\nREHYDRATION TO 15% CHECK")
+
+if dehydration_time is not None:
+    previous_result = None
+    rehydration_result = None
+
+    for result in simulation_results:
+        if result["time"] <= dehydration_time:
+            continue
+
+        if previous_result is not None:
+            if (
+                previous_result["moisture_percent"] < 15.0
+                and result["moisture_percent"] >= 15.0
+            ):
+                rehydration_result = result
+                break
+
+        previous_result = result
+
+    if rehydration_result is not None:
+        print("First predicted return to 15%:", rehydration_result["time"])
+        print(
+            "Predicted moisture:",
+            f"{rehydration_result['moisture_percent']:.2f}%"
+        )
+    else:
+        print("15% was not reached after dehydration during this simulation.")
+else:
+    print("The alfalfa did not reach 5% first.")
+
+    # STEP 13: INSPECT THE 15% REHYDRATION CROSSING
+
+if rehydration_result is not None:
+    crossing_index = simulation_results.index(rehydration_result)
+
+    print("\n15% REHYDRATION CROSSING DETAILS")
+
+    for result in simulation_results[
+        max(0, crossing_index - 2):crossing_index + 2
+    ]:
+        print(
+            result["time"],
+            "| Moisture:",
+            f"{result['moisture_percent']:.2f}%"
+        )
+
+        # STEP 14: INVESTIGATE JUNE 18 MOISTURE REGAIN
+
+print("\nJUNE 18 RAIN AND DEW CONTRIBUTIONS")
+
+for result in simulation_results:
+    if (
+        result["time"].date().isoformat() == "2026-06-18"
+        and result["time"].hour in [7, 8]
+    ):
+        print(
+            result["time"],
+            "| Rain gain:",
+            round(result["rain_gain_db"], 4),
+            "| Dew gain:",
+            round(result["dew_gain_db"], 4)
+        )
+
+        # STEP 15: SEPARATE DRYING AND REHYDRATION WINDOWS
+
+drying_window = []
+rehydration_window = []
+
+for i in range(1, len(simulation_results)):
+    previous = simulation_results[i - 1]
+    current = simulation_results[i]
+
+    moisture = current["moisture_percent"]
+    previous_moisture = previous["moisture_percent"]
+
+    if target_moisture_min <= moisture <= target_moisture_max:
+
+        # Drying: moisture is decreasing.
+        if moisture < previous_moisture:
+            drying_window.append(current)
+
+        # Rehydration: moisture is increasing after reaching 5%.
+        elif (
+            dehydration_time is not None
+            and current["time"] > dehydration_time
+            and moisture > previous_moisture
+        ):
+            rehydration_window.append(current)
+
+print("\nSEPARATE MOISTURE WINDOWS")
+
+if drying_window:
+    print("First drying-window time:", drying_window[0]["time"])
+else:
+    print("No drying window found.")
+
+if rehydration_window:
+    print("First rehydration-window time:", rehydration_window[0]["time"])
+else:
+    print("No rehydration window found.")
+
+    # STEP 16: FARMER-FACING REHYDRATION PREDICTION
+
+print("\nFARMER REHYDRATION FORECAST")
+print("Field:", field_location)
+print("Cutting date:", cutting_date)
+print("Dehydration target: 5%")
+print("Rehydration target: 15%")
+
+if rehydration_result is not None:
+    print("Estimated return to 15%:", rehydration_result["time"])
+    print("\n15-MINUTE MOISTURE PREDICTIONS")
+
+    crossing_index = simulation_results.index(rehydration_result)
+
+    for result in simulation_results[
+        max(0, crossing_index - 4):crossing_index + 3
+    ]:
+        print(
+            result["time"].strftime("%Y-%m-%d %I:%M %p"),
+            "| Estimated moisture:",
+            f"{result['moisture_percent']:.2f}%"
+        )
+else:
+    print("No return to 15% predicted during this period.")
+
+print("\nWARNING: Experimental prediction.")
+print("Check actual hay moisture and field conditions before baling.")
