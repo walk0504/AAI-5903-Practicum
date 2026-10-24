@@ -12,7 +12,8 @@ import os
 import time
 import requests
 import matplotlib.pyplot as plt
-
+from astral import LocationInfo
+from astral.sun import sun
 
 # FARMER INPUTS
 # These are temporary example values for testing.
@@ -160,13 +161,59 @@ print("Last reading:", drying_hourly["time"][-1])
 # Temporary value from our original hydration-index model.
 # Not a measured or field-validated moisture reading.
 
-initial_moisture_wb = 78.05
+# USDA Integrated Farm System Model (Rotz et al.)
+# Seasonal initial moisture expressed as a dry-basis ratio.
+# Summer = 4.5; spring and fall = 5.0.
 
-# Convert wet-basis percentage into dry-basis moisture ratio.
-initial_moisture_db = (
-    initial_moisture_wb / (100 - initial_moisture_wb)
+month = cutting_date_obj.month
+
+if month in [6, 7, 8]:
+    seasonal_moisture_db = 4.5
+else:
+    seasonal_moisture_db = 5.0
+
+
+# Calculate sunrise for the field on the cutting date.
+field = LocationInfo(
+    name=field_location,
+    region="Oklahoma",
+    timezone="America/Chicago",
+    latitude=latitude,
+    longitude=longitude
 )
 
+sunrise_time = sun(
+    field.observer,
+    date=cutting_date_obj,
+    tzinfo=field.timezone
+)["sunrise"]
+
+cutting_datetime = datetime.strptime(
+    f"{cutting_date} {cutting_time}",
+    "%Y-%m-%d %H:%M"
+).replace(tzinfo=sunrise_time.tzinfo)
+
+hours_after_sunrise = max(
+    0,
+    (cutting_datetime - sunrise_time).total_seconds() / 3600
+)
+
+print("Sunrise:", sunrise_time.strftime("%I:%M %p"))
+print("Hours after sunrise:", round(hours_after_sunrise, 2))
+# Assume cutting occurs on the first day of this harvest.
+days_after_harvest_start = 0
+
+# USDA/Rotz starting-moisture estimate (dry basis).
+initial_moisture_db = (
+    seasonal_moisture_db
+    - 0.03 * hours_after_sunrise
+    - 0.05 * days_after_harvest_start
+)
+
+# Convert dry-basis moisture to wet-basis percentage.
+initial_moisture_wb = (
+    initial_moisture_db / (1 + initial_moisture_db)
+) * 100
 # Calculate swath density using our test field inputs.
 yield_grams_per_m2 = (
     hay_yield_tons_per_acre * 907184.74 / 4046.86
@@ -184,6 +231,8 @@ cutting_hour_index = drying_hourly["time"].index(
 )
 
 print("\nINITIAL MOISTURE AND FIELD SETTINGS")
+print("USDA seasonal moisture (dry basis):", seasonal_moisture_db)
+print("Days after harvest start:", days_after_harvest_start)
 print("Starting moisture:", initial_moisture_wb, "%")
 print("Starting moisture (dry basis):", round(initial_moisture_db, 4))
 print("Swath density:", round(swath_density, 2), "g/m²")
@@ -621,3 +670,79 @@ else:
 
 print("\nWARNING: Experimental prediction.")
 print("Check actual hay moisture and field conditions before baling.")
+
+# STEP 17: GRAPH PREDICTED ALFALFA MOISTURE
+
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+
+# Get the dates and moisture percentages from our model
+graph_times = [result["time"] for result in simulation_results]
+graph_moisture = [result["moisture_percent"] for result in simulation_results]
+
+# Create the graph
+plt.figure(figsize=(12, 6))
+
+plt.plot(
+    graph_times,
+    graph_moisture,
+    label="Predicted alfalfa moisture",
+    linewidth=2
+)
+
+# Show important moisture targets
+plt.axhline(5, linestyle=":", label="5% drying target")
+plt.axhspan(13, 16, alpha=0.15, label="13–16% baling range")
+plt.axhline(15, linestyle="--", label="15% rehydration target")
+
+# Add titles and labels
+plt.title("Predicted Alfalfa Moisture — Hammon, Oklahoma")
+plt.xlabel("Date (June 2026)")
+plt.ylabel("Predicted Moisture (%)")
+
+# Format the dates
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+plt.gcf().autofmt_xdate()
+
+plt.ylim(0, 100)
+plt.grid(True, alpha=0.3)
+plt.legend()
+plt.tight_layout()
+
+# Save the graph for our Overleaf report
+plt.savefig("alfalfa_moisture_prediction.png", dpi=300)
+plt.close()
+
+print("Graph saved as alfalfa_moisture_prediction.png")
+
+# STEP 18: GRAPH HOURLY PRECIPITATION
+
+# Get the hourly rainfall measurements
+rain_times = [
+    datetime.fromisoformat(t)
+    for t in drying_hourly["time"]
+]
+
+rain_amounts = drying_hourly["precipitation"]
+
+# Create a rainfall bar graph
+plt.figure(figsize=(12, 5))
+plt.bar(rain_times, rain_amounts, width=0.035)
+
+# Add labels
+plt.title("Hourly Precipitation — Hammon, Oklahoma")
+plt.xlabel("Date (June 2026)")
+plt.ylabel("Hourly Precipitation (mm)")
+
+# Format dates
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))
+plt.gcf().autofmt_xdate()
+
+plt.grid(axis="y", alpha=0.3)
+plt.tight_layout()
+
+# Save the graph
+plt.savefig("alfalfa_precipitation.png", dpi=300)
+plt.close()
+
+print("Graph saved as alfalfa_precipitation.png")
